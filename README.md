@@ -1,133 +1,95 @@
-# vinext-starter
+# ChatGPT Custom Notifications
 
-A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
+Send a custom title and message from ChatGPT to your enrolled devices. The Site gives you a `send_user_notification` tool in ChatGPT Work and a private page for enrolling, testing, and managing devices.
 
-## Prerequisites
+## How it works
 
-- Node.js `>=22.13.0`
-- Portable: Windows, macOS, or Linux; no Bash required
-- Managed Linux: managed Linux runtime with Bash, `flock`, `curl`, `sha256sum`, and GNU `timeout`
-- Git and `tar` (including Windows `tar.exe`) are required for publishing; portable publication does not require Bash
+When you enroll a device, its browser gives the Site a delivery address and the information needed to encrypt messages for it. This is called a *push subscription*. The browser’s push service can relay notifications when the Site tab is closed.
 
-## Sites Lifecycle
-
-The Sites initializer copies the shared starter and selects managed-linux only when `SITES_MANAGED_LINUX_CONTAINER=1`; otherwise it selects portable. It saves the selection only in ignored `.sites-runtime/execution-profile.json`. Both profiles copy/configure first, then use the plugin's separate `install-dependencies.mjs` step to measure installation independently. Edit source under `app/` and follow the Sites skill for installation, preview, builds, and publishing.
-
-Run `node <plugin-root>/scripts/configure-execution-profile.mjs` only when the profile is unknown for the current checkout and environment. Profile changes do not alter tracked source or require reinstalling otherwise-valid dependencies; restart an existing preview to use the new selection. Do not commit or upload `.sites-runtime/`.
-
-This starter does not use `wrangler.jsonc`.
-
-Publish archives outside the source checkout or under its ignored `outputs/` directory. Local `.env*`, `.dev.vars*`, TypeScript build state, and tool runtime directories are ignored; keep the hosting manifest, migrations, and authored scripts in source control.
-
-`install:ci` runs `npm ci` once against the shared lockfile, disables parent-workspace discovery, and includes required dev/optional dependencies despite production/omit settings. Sharp defaults to prebuilt binaries unless explicitly configured otherwise. Do not overlap installers.
-
-- **Portable:** Preserve host HOME, npm cache, registry, proxy, temporary paths, retry/concurrency settings, and lifecycle-script policy. Use `--prefer-offline --no-audit --no-fund`.
-- **Managed Linux:** Use the existing project-local HOME/cache/tmp setup and Linux install lock, tarball preflight, and timeout. Restore the image-seeded npm cache only when its lockfile hash matches; retain network fallback. Builds keep their existing timeout. These helpers are not invoked by the portable profile.
-
-`scripts/sites-env.mjs` preserves the caller's HOME, npm cache, proxy, XDG, and temporary-directory configuration while defaulting Wrangler and Miniflare state to the checkout. If npm reports an unwritable cache, select a writable path with `npm_config_cache` for that install. The `dev` and `start` scripts also keep Wrangler logs inside the checkout. Generated `.sites-runtime/` and `.wrangler/` directories are disposable and ignored by Git.
-
-On portable, `npm run dev` uses `vinext dev` with HMR, starting at port 5173. Vinext records the running server in ignored `.vinext/` state, rejects an ordinary duplicate launch, and recovers stale state after a stopped process; exactly simultaneous starts can race. Pass `--port <port>` or `--hostname <host>` after `npm run dev --` when needed; keep portable previews on loopback.
-
-For managed Linux browser QA, follow the Sites skill's managed preview reference. The daemon runs the project's Vite dev script with `--host 0.0.0.0 --port 4173 --strictPort`; use the CLI's returned URL. The ignored local profile survives the daemon's cleared environment.
-
-The portable profile simulates ChatGPT sign-in only for loopback development requests. Visit `/signin-with-chatgpt?return_to=/` to sign in as `local_seedy` (`seedy@sites.test`, display name `Seedy`) and `/signout-with-chatgpt?return_to=/` to sign out. The development cookie preserves that identity across server restarts. Mock auth is disabled in the managed-linux profile and is not included in production builds; hosted authentication remains dispatch-owned.
-
-The Worker uses `vinext/server/fetch-handler`, including Vinext's config-aware image handling. After building, `npm start` runs that Worker locally through Wrangler on `127.0.0.1`, sharing `.wrangler/state` with dev preview and local D1 migrations; it does not deploy the site or simulate sign-in. Use the URL printed by the server. Pass `npm start -- --port <port>` to select a different built-preview port.
-
-Local previews use Miniflare's placeholder `Request.cf` metadata without a network lookup. Set `CLOUDFLARE_CF_FETCH_ENABLED=true` to opt into fetching preview metadata; this setting does not change hosted request metadata.
-
-Local tool usage metrics are disabled by default. Set `WRANGLER_SEND_METRICS=true` to opt in.
-
-## Included Shape
-
-- edit site code under `app/`
-- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `worker/index.ts` is the production Worker entrypoint and preserves request-scoped connector bindings
-- `scripts/vite/` contains the maintained Vite integrations and the vendored Sites plugin license
-- `scripts/connector-preview/` contains the local connector preview Worker and session helpers
-- the remaining `scripts/` files select execution profiles and run installation, development, and builds; the plugin's helpers orchestrate the Sites lifecycle
-- `dist/` contains generated deployment output; `.vinext/`, `.wrangler/`, and `.sites-runtime/` contain ignored local tool state
-- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
-- `@cloudflare/workers-types` provides Worker types; `cloudflare-env.d.ts` declares optional `DB`/`BUCKET` bindings—update these declarations if binding names change
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
-
-The user ID is stable for the same user on the same Site and different across Sites. Use it as the durable user key; use email and name for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive `oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty `name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by `oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```mermaid
+flowchart TD
+  Chat["ChatGPT or the Site's test form"]
+  Site["Private Site finds active devices and encrypts each alert"]
+  Relay["Google or Mozilla push service relays the encrypted alert"]
+  Browser["Enrolled browser decrypts and displays the alert"]
+  Chat -->|"Title and message over HTTPS"| Site
+  Site -->|"Encrypted Web Push message"| Relay
+  Relay -->|"Encrypted Web Push message"| Browser
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+The Site stores the subscriptions in Cloudflare D1. It uses standard Web Push and VAPID with Google and Mozilla push services. Setup requires no Firebase project, OpenAI API key, or separate mobile app.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs optional or required ChatGPT sign-in:
+The tool reports push-service acceptance. Check the target device to confirm that its browser and operating system displayed the notification.
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use the returned `userId` as the stable user key for user-owned records; do not use email as a durable identifier.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send anonymous visitors through Sign in with ChatGPT.
-- In a Server Component, start sign-in with `<a href={chatGPTSignInPath(returnTo)} target="_top">`. The auth helper module is server-only; do not import it into a Client Component.
-- Do not use `fetch`, XHR, a client-side router, or a framework link that can prefetch the sign-in route. SIWC must start as a top-level navigation.
-- Never request the AuthAPI authorization endpoint directly. The dispatch-owned `/signin-with-chatgpt` route must start the SIWC flow.
-- Use `chatGPTSignOutPath(returnTo)` for browser sign-out links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because they depend on per-request identity headers.
+## Device compatibility
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the OAuth cookies, and identity header injection. Do not implement app routes for those reserved paths. Routes that do not import and call the helper remain anonymous-compatible.
+| Device or browser | Support |
+| --- | --- |
+| Android with Chrome | Supported and verified on a physical device. |
+| Android with Firefox | The Site accepts Mozilla subscriptions and the delivery path was tested in simulation. Delivery on a physical Firefox device has yet to be verified. |
+| Windows, macOS, and Linux | Chrome and Firefox can enroll when Web Push is available and the browser uses a supported push endpoint. Desktop notification delivery has yet to be verified on a physical device. |
+| iPhone, iPad, and Safari | Apple push endpoints are outside the current implementation. |
 
-SIWC establishes identity only; it does not prove workspace membership. Use the Sites hosting platform's access policy controls for workspace-wide restrictions, or enforce explicit server-side membership or allowlist checks.
+Notification permission must be enabled for the Site in the receiving browser. The browser and operating system control how notifications appear and whether they arrive while the browser is fully closed.
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write actions tied to the current ChatGPT user. Leave public content anonymous.
+## Install your own private Site
 
-## Local D1 migrations
+You’ll need access to ChatGPT Sites and permission to create a Site-hosted plugin. See [Creating and using ChatGPT Sites](https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites) and [Hosting a plugin with ChatGPT Sites](https://help.openai.com/en/articles/20001547-hosting-a-plugin-with-chatgpt-sites).
 
-For a D1-backed local preview, generate SQL with `npm run db:generate`. Build once through the Sites skill's build entrypoint (or `npm run build` for standalone use) to generate `dist/server/wrangler.json`, rebuilding if bindings change. From the project root, apply each pending migration in order:
+1. From GitHub, select **Code → Download ZIP**.
+2. Open a **ChatGPT Work** chat, attach the ZIP, select **@Sites**, and send the prompt below.
+3. Open the published Site through the enrollment link ChatGPT gives you. Connect the generated plugin if prompted.
+
+> Use the attached source to create a new private ChatGPT Site named **Phone Notifications** in my account. Use the repository’s hosting manifest and D1 migrations. Add the new project ID in the deployment checkout. Set `SITE_ORIGIN` to the Site’s HTTPS origin and generate a fresh VAPID key pair. Store `VAPID_PRIVATE_JWK` as a Site runtime secret. Publish with the MCP capability enabled and give me the enrollment link and plugin connection instructions.
+
+Each installation has its own Site, database, and signing keys. The ZIP workflow uses ChatGPT Work to deploy the source. The resulting plugin connects to that installation.
+
+### Runtime configuration
+
+Set these values in the deployed Site’s environment. The blank [.env.example](.env.example) describes the names used by the Worker.
+
+| Variable | Value |
+| --- | --- |
+| `SITE_ORIGIN` | The new Site’s HTTPS origin with no path, query, or fragment. |
+| `VAPID_PUBLIC_KEY` | The base64url-encoded, uncompressed P-256 public key. |
+| `VAPID_PRIVATE_JWK` | The matching P-256 private key as a JSON JWK. Enter it as a **secret** in the Site’s runtime settings. |
+
+Keep the signing key for the lifetime of the installation. Changing it requires affected browsers to subscribe with the new key. The project ID belongs in the deployment checkout’s `.openai/hosting.json`. The source template includes the D1 and MCP declarations, and Sites applies the initial schema on deployment.
+
+## Enroll and use
+
+1. Open the published Site directly in Chrome or Firefox on each device you want to receive alerts on. Sign in with the account that owns the Site.
+2. Enter a device name and select **Enroll this device**. Allow notifications when your browser prompts you.
+3. In **Send a test**, choose a device or **All active devices**, enter a title and body, then send the test.
+4. In a new ChatGPT Work chat, select **@Phone Notifications** and try “Send a notification titled ‘Backup complete’ with the message ‘The nightly backup finished successfully.’”
+
+`send_user_notification` sends one alert to each active device. It takes `title` and `body`, plus an optional `event_id`. Retry with the same event ID, title, and body to deduplicate attempts per device for 30 days. Use a new event ID if you change the text. A retry can reach an originally eligible device after a definite send failure. Devices enrolled or resumed after the original alert do not get a replay.
+
+## Manage devices and troubleshoot
+
+- **Pause**, **Resume**, **Rename**, and **Remove** work from any browser signed in to the Site. A paused device stays paused until you explicitly resume it. An alert already accepted by the push service may still arrive.
+- **Unsubscribe in the browser** stops notifications there. The Site removes that enrollment when the push service reports its subscription is invalid. Other active devices continue to receive alerts. To receive alerts again, restore browser permission and enroll again.
+- **A send is accepted but nothing appears** means the push service accepted it for delivery. Check the receiving browser’s permission for the Site and the device’s notification settings.
+- **The tool is missing in ChatGPT Work** can mean the generated plugin still needs to be installed or connected under **Plugins → Personal → Created by you**.
+- **Scheduled use** should be tested in your own setup, including whether the scheduled tool call needs approval.
+
+## Build the source locally
+
+Use Node.js 22.13 or later. From the repository root, run:
 
 ```sh
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_example.sql
+npm ci
+npm run build
 ```
 
-Replace the filename with the pending migration and `DB` with your D1 binding name if different. Use `.wrangler/state`, not `.wrangler/state/v3`; Wrangler adds the versioned directories. Do not replay migrations already applied locally. This updates only the preview database; publishing applies production migrations separately.
+The build produces a Cloudflare Worker and browser assets. Hosted sign-in, runtime secrets, and production D1 storage are supplied by your ChatGPT Site. The relevant source is in `app/` (enrollment UI, API, and MCP route), `lib/` (push and delivery logic), `public/phone-push-sw.js` (notification display), and `drizzle/` (D1 migrations).
 
-## Diagnostic Commands
+The project is distributed under the [MIT License](LICENSE). The vendored components retain their upstream license notices.
 
-- `npm run install:ci`: perform the one locked dependency install
-- `npm run dev`: start the Vite/Vinext development server
-- `npm run build`: build the deployable Sites artifact
-- `npm run start`: preview the built Worker locally with D1/R2 support
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+## Security and privacy
 
-When using the Sites plugin, follow its skill instructions for installation, builds, and publishing. These npm commands remain available for standalone use.
-
-The portable build runs Vinext directly without a host `timeout` command. The managed-linux build uses `scripts/build-verified.sh` and its existing `SITES_BUILD_TIMEOUT` setting.
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- **Installation.** Review the source and dependencies before deploying code downloaded from the Internet. Publish the Site privately for your account.
+- **Signing key.** Store the VAPID private key as a Site runtime secret. The enrollment page receives only the public key. Someone with the private key and the corresponding browser subscription details could impersonate the sender. If the key leaks, replace it and re-enroll affected devices.
+- **Message encryption.** ChatGPT or the test form sends the title and body to the Site over HTTPS. The Site can read them and encrypts a separate copy for each browser using that subscription’s public key and shared authentication secret plus a fresh sender key pair. The browser keeps its decryption private key. The Google or Mozilla push service relays ciphertext and can see delivery metadata such as the destination and timing. It cannot read the title or body. The browser decrypts the alert before displaying it, where it may be visible on the lock screen. The VAPID key identifies the sender to the push service. Payload encryption uses separate keys. See [Web Push message encryption](https://www.rfc-editor.org/rfc/rfc8291) and [VAPID](https://www.rfc-editor.org/rfc/rfc8292).
+- **Stored data.** D1 retains device names and status, Site-scoped user IDs, and browser push endpoints and encryption keys. For alerts with an event ID, it also stores a digest and per-device attempt records. Deduplication expires after 30 days, with cleanup on a later event-ID send. The app does not store the title or body in D1. Database access can reveal device and delivery metadata. A digest can also reveal whether guessed text matches an alert.
+- **Access and sharing.** ChatGPT Sites handles sign-in and supplies the caller’s Site-scoped identity. The app uses that identity to restrict device management and sends to the caller’s records. The production APIs also check the Site origin for browser writes. People you share the Site with gain access under the roles you grant. Keep the Site private for personal use and share access only with people you trust. Deployment operators with database or runtime configuration access should be treated as trusted.
